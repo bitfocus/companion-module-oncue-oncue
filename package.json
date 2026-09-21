@@ -1,27 +1,27 @@
 {
-	"name": "your-module-name",
-	"version": "0.1.0",
-	"main": "src/main.js",
-	"scripts": {
-		"format": "prettier -w .",
-		"package": "companion-module-build"
-	},
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/bitfocus/companion-module-your-module-name.git"
-	},
-	"engines": {
-		"node": "^22.20",
-		"yarn": "^4"
-	},
-	"dependencies": {
-		"@companion-module/base": "~2.0.4"
-	},
-	"devDependencies": {
-		"@companion-module/tools": "^3.1.0",
-		"prettier": "^3.8.3"
-	},
-	"prettier": "@companion-module/tools/.prettierrc.json",
-	"packageManager": "yarn@4.17.0"
+  "name": "companion-module-oncue-oncue",
+  "version": "1.3.0",
+  "description": "Companion module for OnCue (Timer, Teleprompter, Player)",
+  "main": "main.js",
+  "engines": {
+    "node": "^22.8"
+  },
+  "license": "MIT",
+  "keywords": [
+    "companion-module"
+  ],
+  "companion": {
+    "id": "oncue-oncue",
+    "name": "OnCue"
+  },
+  "repository": "git+https://github.com/bitfocus/companion-module-oncue-oncue.git",
+  "scripts": {
+    "package": "companion-module-build"
+  },
+  "dependencies": {
+    "@companion-module/base": "^1.14.1"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "^2.0.0"
+  }
 }
