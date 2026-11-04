@@ -112,9 +112,15 @@ class OnCueInstance extends InstanceBase {
         const state = await this.fetchState();
         if (state === null) {
           this.updateStatus(InstanceStatus.ConnectionFailure, 'OnCue not found');
+          if (this.connected !== false) {
+            this.connected = false;
+            this.setVariableValues({ oncue_connection: 'disconnected' });
+            this.checkFeedbacks('oncue_connected', 'oncue_disconnected', 'oncue_module_open');
+          }
           return;
         }
         this.updateStatus(InstanceStatus.Ok);
+        this.connected = true;
         this.state = state;
         this.updateVariables();
         this.checkFeedbacks();
@@ -122,6 +128,30 @@ class OnCueInstance extends InstanceBase {
         this.log('error', 'Error in pollInterval: ' + (err.stack || err.message));
       }
     }, 250); // same refresh rate as OnCue itself — keeps the time variable aligned with the real display
+  }
+
+  // ─── Action helpers ──────────────────────────────────────────────────────
+  onOffToggleOption() {
+    return {
+      type: 'dropdown', id: 'state', label: 'State', default: 'toggle',
+      choices: [{ id: 'on', label: 'On' }, { id: 'off', label: 'Off' }, { id: 'toggle', label: 'Toggle' }]
+    };
+  }
+
+  onOffToggleParams(state) {
+    if (state === 'on') return { enabled: true };
+    if (state === 'off') return { enabled: false };
+    return {}; // no value = toggle
+  }
+
+  timerOptionAction(id, name, command) {
+    return {
+      [id]: {
+        name,
+        options: [this.onOffToggleOption()],
+        callback: async (action) => { await this.sendCommand('timer', command, this.onOffToggleParams(action.options.state)); }
+      }
+    };
   }
 
   // ─── Actions ─────────────────────────────────────────────────────────────
@@ -192,6 +222,43 @@ class OnCueInstance extends InstanceBase {
       timer_allow_negative_off:    { name: 'Timer: Disable Negative Counting (stays at 00:00)', options: [], callback: async () => { await this.sendCommand('timer', 'setallownegative', { enabled: false }); } },
       timer_allow_negative_toggle: { name: 'Timer: Toggle Negative Counting on Expire', options: [], callback: async () => { await this.sendCommand('timer', 'setallownegative', {}); } },
 
+      // Display options (OnCue 1.0.2+): on / off / toggle
+      ...this.timerOptionAction('timer_show_clock', 'Timer: Show Clock on Display', 'setclock'),
+      ...this.timerOptionAction('timer_top_layout', 'Timer: Timer at the Top (top bar layout)', 'settoplayout'),
+      ...this.timerOptionAction('timer_show_labels', 'Timer: Show Labels (TIMER / CLOCK names)', 'setlabels'),
+      ...this.timerOptionAction('timer_show_timeup_label', 'Timer: Show "TIME\'S UP!" Warning', 'settimeuplabel'),
+      ...this.timerOptionAction('timer_message_blink', 'Timer: Blink Message', 'setmessageblink'),
+      ...this.timerOptionAction('timer_video_background', 'Timer: Video Background (camera, capture card or NDI)', 'setvideo'),
+
+      timer_set_message_size: {
+        name: 'Timer: Set Message Size',
+        options: [{ type: 'number', id: 'size', label: 'Size (%, 50-250; the text still shrinks to fit)', default: 100, min: 50, max: 250 }],
+        callback: async (action) => { await this.sendCommand('timer', 'setmessagesize', { size: action.options.size }); }
+      },
+      timer_adjust_message_size: {
+        name: 'Timer: Adjust Message Size (relative — for jog wheels/encoders)',
+        options: [{ type: 'number', id: 'delta', label: 'Adjustment (%, use negative to decrease)', default: 10, min: -200, max: 200 }],
+        callback: async (action) => { await this.sendCommand('timer', 'adjustmessagesize', { delta: action.options.delta }); }
+      },
+      timer_ndi_on: {
+        name: 'Timer: Turn NDI Output On (turning it off is only done in OnCue)',
+        options: [],
+        callback: async () => { await this.sendCommand('timer', 'ndion'); }
+      },
+
+      timer_load_speaker: {
+        name: 'Timer: Load Speaker by Number',
+        options: [{ type: 'number', id: 'number', label: 'Speaker number (1 = first in the list)', default: 1, min: 1, max: 999 }],
+        callback: async (action) => { await this.sendCommand('timer', 'loadspeaker', { index: action.options.number }); }
+      },
+      timer_load_speaker_by_name: {
+        name: 'Timer: Load Speaker by Name',
+        options: [{ type: 'textinput', id: 'name', label: 'Speaker name (or part of it)', default: '' }],
+        callback: async (action) => { await this.sendCommand('timer', 'loadspeaker', { name: action.options.name }); }
+      },
+      timer_next_speaker: { name: 'Timer: Next Speaker', options: [], callback: async () => { await this.sendCommand('timer', 'nextspeaker'); } },
+      timer_prev_speaker: { name: 'Timer: Previous Speaker', options: [], callback: async () => { await this.sendCommand('timer', 'prevspeaker'); } },
+
       // ── Teleprompter ───────────────────────────────────────────────────
       tp_play:  { name: 'Teleprompter: Play',  options: [], callback: async () => { await this.sendCommand('teleprompter', 'play'); } },
       tp_pause: { name: 'Teleprompter: Pause', options: [], callback: async () => { await this.sendCommand('teleprompter', 'pause'); } },
@@ -214,6 +281,35 @@ class OnCueInstance extends InstanceBase {
       },
 
       tp_togglemirror: { name: 'Teleprompter: Toggle Mirror', options: [], callback: async () => { await this.sendCommand('teleprompter', 'togglemirror'); } },
+
+      tp_set_direction: {
+        name: 'Teleprompter: Scroll Direction',
+        options: [{
+          type: 'dropdown', id: 'direction', label: 'Direction', default: 'toggle',
+          choices: [{ id: 'up', label: 'Up (text moves up, normal)' }, { id: 'down', label: 'Down (text moves down, goes back)' }, { id: 'toggle', label: 'Toggle' }]
+        }],
+        callback: async (action) => {
+          const d = action.options.direction;
+          await this.sendCommand('teleprompter', 'setdirection', d === 'toggle' ? {} : { direction: d });
+        }
+      },
+      tp_goto_marker: {
+        name: 'Teleprompter: Go to Section Marker',
+        options: [{ type: 'number', id: 'number', label: 'Marker number (1 = first ---)', default: 1, min: 1, max: 999 }],
+        callback: async (action) => { await this.sendCommand('teleprompter', 'gotomarker', { index: action.options.number }); }
+      },
+      tp_next_marker: { name: 'Teleprompter: Next Section Marker', options: [], callback: async () => { await this.sendCommand('teleprompter', 'nextmarker'); } },
+      tp_prev_marker: { name: 'Teleprompter: Previous Section Marker', options: [], callback: async () => { await this.sendCommand('teleprompter', 'prevmarker'); } },
+      tp_set_font_size: {
+        name: 'Teleprompter: Set Font Size',
+        options: [{ type: 'number', id: 'size', label: 'Font size (20-120)', default: 52, min: 20, max: 120 }],
+        callback: async (action) => { await this.sendCommand('teleprompter', 'setfontsize', { size: action.options.size }); }
+      },
+      tp_adjust_font_size: {
+        name: 'Teleprompter: Adjust Font Size (relative — for jog wheels/encoders)',
+        options: [{ type: 'number', id: 'delta', label: 'Adjustment (use negative to decrease)', default: 4, min: -100, max: 100 }],
+        callback: async (action) => { await this.sendCommand('teleprompter', 'adjustfontsize', { delta: action.options.delta }); }
+      },
 
       // ── Player ─────────────────────────────────────────────────────────
       player_play:  { name: 'Player: Play',  options: [], callback: async () => { await this.sendCommand('player', 'play'); } },
@@ -240,6 +336,18 @@ class OnCueInstance extends InstanceBase {
       player_fadeout:       { name: 'Player: Fade Out', options: [], callback: async () => { await this.sendCommand('player', 'fadeout'); } },
       player_toggleshuffle: { name: 'Player: Toggle Shuffle', options: [], callback: async () => { await this.sendCommand('player', 'toggleshuffle'); } },
       player_cyclerepeat:   { name: 'Player: Cycle Repeat Mode', options: [], callback: async () => { await this.sendCommand('player', 'cyclerepeat'); } },
+
+      player_stop_at_end: {
+        name: 'Player: Stop at End of Track (don\'t go to the next one)',
+        options: [this.onOffToggleOption()],
+        callback: async (action) => { await this.sendCommand('player', 'setstopatend', this.onOffToggleParams(action.options.state)); }
+      },
+      player_play_number: {
+        name: 'Player: Play Track by Number (playlist)',
+        options: [{ type: 'number', id: 'number', label: 'Track number (1 = first in the playlist)', default: 1, min: 1, max: 9999 }],
+        callback: async (action) => { await this.sendCommand('player', 'playindex', { index: action.options.number }); }
+      },
+      player_goto_cue: { name: 'Player: Go to Cue In', options: [], callback: async () => { await this.sendCommand('player', 'gotocue'); } },
 
       player_play_by_name: {
         name: 'Player: Play Track by Name',
@@ -351,6 +459,43 @@ class OnCueInstance extends InstanceBase {
         options: [],
         callback: () => this.state.timer.allowNegative !== false
       },
+      timer_option_enabled: {
+        name: 'Timer: Display Option (enabled)',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(0, 123, 255), color: combineRgb(255, 255, 255) },
+        options: [{
+          type: 'dropdown', id: 'option', label: 'Option', default: 'showClock',
+          choices: [
+            { id: 'showClock', label: 'Show Clock' },
+            { id: 'topLayout', label: 'Timer at the Top' },
+            { id: 'showLabels', label: 'Show Labels' },
+            { id: 'showTimeUpLabel', label: 'Show "TIME\'S UP!" Warning' },
+            { id: 'allowMessageBlink', label: 'Blink Message' },
+            { id: 'useVideoSource', label: 'Video Background' }
+          ]
+        }],
+        callback: (feedback) => {
+          const t = this.state.timer || {};
+          const v = t[feedback.options.option];
+          // Options that are on by default count as on when OnCue doesn't report them (older versions)
+          if (v === undefined) return ['showClock', 'showLabels', 'showTimeUpLabel'].includes(feedback.options.option) && t.type !== undefined;
+          return !!v;
+        }
+      },
+      timer_message_on_screen: {
+        name: 'Timer: Message on Screen',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(0, 123, 255), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => !!(this.state.timer && String(this.state.timer.message || '').trim())
+      },
+      timer_ndi_on: {
+        name: 'Timer: NDI Output On',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(0, 180, 0), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => !!(this.state.ndi && this.state.ndi.timer)
+      },
 
       // ── Teleprompter ───────────────────────────────────────────────────
       tp_is_playing: {
@@ -359,6 +504,13 @@ class OnCueInstance extends InstanceBase {
         defaultStyle: { bgcolor: combineRgb(0, 123, 255), color: combineRgb(255, 255, 255) },
         options: [],
         callback: () => !!this.state.teleprompter.isPlaying
+      },
+      tp_direction_down: {
+        name: 'Teleprompter: Scrolling Down (going back)',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(255, 165, 0), color: combineRgb(0, 0, 0) },
+        options: [],
+        callback: () => this.state.teleprompter.direction === -1
       },
 
       // ── Player ─────────────────────────────────────────────────────────
@@ -384,6 +536,39 @@ class OnCueInstance extends InstanceBase {
           const p = pads[feedback.options.pad - 1];
           return !!(p && p.isPlaying);
         }
+      },
+      player_stop_at_end_enabled: {
+        name: 'Player: Stop at End of Track (enabled)',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(0, 123, 255), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => !!this.state.player.stopAtEnd
+      },
+
+      // ── General ────────────────────────────────────────────────────────
+      oncue_connected: {
+        name: 'OnCue: Connected',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(0, 180, 0), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => !!this.connected
+      },
+      oncue_disconnected: {
+        name: 'OnCue: Not Connected',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(220, 53, 69), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => !this.connected
+      },
+      oncue_module_open: {
+        name: 'OnCue: Module Open',
+        type: 'boolean',
+        defaultStyle: { bgcolor: combineRgb(0, 123, 255), color: combineRgb(255, 255, 255) },
+        options: [{
+          type: 'dropdown', id: 'module', label: 'Module', default: 'timer',
+          choices: [{ id: 'timer', label: 'Timer' }, { id: 'teleprompter', label: 'Teleprompter' }, { id: 'player', label: 'Player' }]
+        }],
+        callback: (feedback) => !!(this.connected && this.state.modules && this.state.modules[feedback.options.module])
       }
 
     });
@@ -404,8 +589,57 @@ class OnCueInstance extends InstanceBase {
       { variableId: 'player_status', name: 'Player: status (playing/paused)' },
       { variableId: 'player_volume', name: 'Player: volume (%)' },
 
-      ...[1,2,3,4,5,6,7,8,9].map(n => ({ variableId: `player_pad_${n}_name`, name: `Player: Pad ${n} name` }))
+      ...[1,2,3,4,5,6,7,8,9].map(n => ({ variableId: `player_pad_${n}_name`, name: `Player: Pad ${n} name` })),
+
+      { variableId: 'timer_speaker',      name: 'Timer: current speaker' },
+      { variableId: 'timer_next_speaker', name: 'Timer: next speaker in the list' },
+      { variableId: 'timer_configured',   name: 'Timer: configured time (HH:MM:SS)' },
+      { variableId: 'timer_progress',     name: 'Timer: elapsed (% of the configured time, countdown only)' },
+
+      { variableId: 'tp_direction',      name: 'Teleprompter: scroll direction (up/down)' },
+      { variableId: 'tp_section',        name: 'Teleprompter: current section (marker)' },
+      { variableId: 'tp_section_number', name: 'Teleprompter: current section number' },
+      { variableId: 'tp_font_size',      name: 'Teleprompter: font size' },
+
+      { variableId: 'player_elapsed',    name: 'Player: elapsed time of the track (M:SS)' },
+      { variableId: 'player_remaining',  name: 'Player: remaining time of the track (-M:SS, up to the Cue Out)' },
+      { variableId: 'player_next_track', name: 'Player: next track' },
+
+      { variableId: 'oncue_connection',  name: 'OnCue: connection (connected/disconnected)' },
+      { variableId: 'timer_open',        name: 'OnCue: Timer open (yes/no)' },
+      { variableId: 'tp_open',           name: 'OnCue: Teleprompter open (yes/no)' },
+      { variableId: 'player_open',       name: 'OnCue: Player open (yes/no)' }
     ]);
+  }
+
+  static fmtHMS(total) {
+    const s = Math.max(0, Math.floor(total || 0));
+    return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  static fmtMS(total) {
+    const s = Math.max(0, Math.floor(total || 0));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  // Teleprompter position right now, with the same anchor math OnCue uses
+  getTpY() {
+    const tp = this.state.teleprompter || {};
+    if (!Number.isFinite(tp.scrollY) || !Number.isFinite(tp.scrollTs)) return null;
+    let y = tp.scrollY;
+    if (tp.isPlaying) y += (tp.direction === -1 ? -1 : 1) * (tp.speed || 0) * 40 * (Date.now() - tp.scrollTs) / 1000;
+    const max = Number.isFinite(tp.maxY) ? tp.maxY : Infinity;
+    return Math.min(Math.max(0, y), max);
+  }
+
+  // Player track position right now (OnCue reports it every second while playing)
+  getPlayerPosition() {
+    const p = this.state.player || {};
+    if (!Number.isFinite(p.position)) return null;
+    let pos = p.position;
+    if (p.isPlaying && Number.isFinite(p.positionTs)) pos += (Date.now() - p.positionTs) / 1000;
+    const end = p.cueOut > 0 ? p.cueOut : p.duration;
+    return { pos: end > 0 ? Math.min(pos, end) : pos, end: end || 0 };
   }
 
   // Computes the timer's current value using the same anchor-based logic
@@ -470,7 +704,41 @@ class OnCueInstance extends InstanceBase {
       padVars[`player_pad_${i + 1}_name`] = pads[i] ? pads[i].name : '';
     }
 
+    // Timer: progress of the configured time (countdown only)
+    let progress = '';
+    if (t.isCountdown && t.configuredSeconds > 0) {
+      progress = t.isTimeUp ? 100 : Math.round(Math.min(100, Math.max(0, (t.configuredSeconds - Math.max(0, seconds)) / t.configuredSeconds * 100)));
+    }
+
+    // Teleprompter: current section from the marker positions
+    let section = '';
+    let sectionNumber = '';
+    const y = this.getTpY();
+    if (y !== null && Array.isArray(tp.markers)) {
+      tp.markers.forEach((m, i) => { if (m && m.y <= y + 2) { section = m.label; sectionNumber = i + 1; } });
+    }
+
+    const pp = this.getPlayerPosition();
+    const modules = this.state.modules || {};
+    const yesNo = (v) => (v ? 'yes' : 'no');
+
     this.setVariableValues({
+      timer_speaker: t.speakerName || '',
+      timer_next_speaker: t.nextSpeakerName || '',
+      timer_configured: t.configuredSeconds !== undefined ? OnCueInstance.fmtHMS(t.configuredSeconds) : '',
+      timer_progress: progress,
+      tp_direction: tp.direction === -1 ? 'down' : (tp.direction === 1 ? 'up' : ''),
+      tp_section: section,
+      tp_section_number: sectionNumber,
+      tp_font_size: tp.fontSize !== undefined ? tp.fontSize : '',
+      player_elapsed: pp ? OnCueInstance.fmtMS(pp.pos) : '',
+      player_remaining: pp && pp.end > 0 ? '-' + OnCueInstance.fmtMS(Math.ceil(pp.end - pp.pos)) : '',
+      player_next_track: p.nextTrackName || '',
+      oncue_connection: 'connected',
+      timer_open: this.state.modules ? yesNo(modules.timer) : '',
+      tp_open: this.state.modules ? yesNo(modules.teleprompter) : '',
+      player_open: this.state.modules ? yesNo(modules.player) : '',
+
       timer_time: timeStr,
       timer_status: timerStatus,
       timer_message: t.message || '',
