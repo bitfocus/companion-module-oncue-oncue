@@ -94,5 +94,5 @@ Control OnCue's Timer, Teleprompter, and Audio Player modules from Bitfocus Comp
 ## Notes
 
 - OnCue and Companion need to be on the same local network. No internet connection is required.
-- The actions, feedbacks and variables added in module 1.3.5 need OnCue 1.0.2 or newer. With an older OnCue, those buttons simply do nothing; everything else keeps working.
+- The actions, feedbacks and variables added in module 1.4.0 need OnCue 1.0.2 or newer. With an older OnCue, those buttons simply do nothing; everything else keeps working.
 - This module was built for OnCue's own Timer/Teleprompter/Player modules and does not control third-party software.
